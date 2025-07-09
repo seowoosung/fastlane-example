@@ -1,0 +1,52 @@
+default_platform(:ios)
+
+platform :ios do
+  desc "Build IPA with match (p8) and export for App Store"
+  lane :build_ipa do
+    # 인증서, 프로비저닝 프로파일을 p8 기반으로 자동 관리
+    match(
+      type: "appstore",
+      readonly: false
+    )
+
+    # Xcodeproj에 build version 등 설정
+    require 'xcodeproj'
+    project = Xcodeproj::Project.open("../TestApp.xcodeproj")
+    target = project.targets.find { |t| t.name == "TestApp" }
+    target.build_configurations.each do |config|
+      config.build_settings['MARKETING_VERSION'] = ENV["BUILD_VERSION"]
+      config.build_settings["PRODUCT_BUNDLE_IDENTIFIER"] = ENV["MATCH_APP_IDENTIFIER"]
+      config.build_settings["DEVELOPMENT_TEAM"] = ENV["TEAM_ID"]
+    end
+    project.save
+
+    # provisioning profile 설정
+    app_identifier = ENV["MATCH_APP_IDENTIFIER"]
+    profile_env_key = "sigh_#{app_identifier}_appstore"
+    profile_uuid = ENV[profile_env_key]
+    profile_path = "#{ENV["HOME"]}/Library/MobileDevice/Provisioning Profiles/#{profile_uuid}.mobileprovision"
+
+    update_project_provisioning(
+      xcodeproj: "./TestApp.xcodeproj",
+      profile: profile_path,
+      build_configuration: "Release",
+      code_signing_identity: "Apple Distribution",
+    )
+
+    # IPA 빌드
+    build_ios_app(
+      scheme: "TestApp(Release)",    
+      export_method: "app-store",
+      clean: true,
+      output_directory: "./build",
+      output_name: "TestApp.ipa"
+    )
+
+    # TestFlight 업로드
+    upload_to_testflight(
+      ipa: "./build/TestApp.ipa",
+      skip_waiting_for_build_processing: false,
+      distribute_external: false 
+    )
+  end
+end
